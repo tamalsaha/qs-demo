@@ -4,11 +4,10 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"github.com/gorilla/schema"
+	"net/url"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	cu "kmodules.xyz/client-go/client"
-
-	"github.com/meilisearch/meilisearch-go"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2/klogr"
@@ -18,30 +17,7 @@ import (
 )
 
 func main() {
-	client := meilisearch.NewClient(meilisearch.ClientConfig{
-		Host: "http://localhost:7700",
-	})
-
-	// https://docs.meilisearch.com/learn/core_concepts/primary_key.html#primary-field
-	// md5("C=%s," +"G=%s,K=%s,NS=%s,N=%s")
-
-	client.CreateIndex(&meilisearch.IndexConfig{
-		Uid:        "k8s",
-		PrimaryKey: "oid",
-	})
-
-	//documents := []map[string]interface{}{
-	//	{
-	//		"reference_number": 287947,
-	//		"title":            "Diary of a Wimpy Kid",
-	//		"author":           "Jeff Kinney",
-	//		"genres":           []string{"comedy", "humor"},
-	//		"price":            5.00,
-	//	},
-	//}
-	//client.Index("k8s").AddDocuments(documents, "reference_number")
-
-	err := indexPods(client.Index("k8s"))
+	err := indexPods()
 	if err != nil {
 		panic(err)
 	}
@@ -71,14 +47,9 @@ func NewClient() (client.Client, error) {
 	})
 }
 
-func indexPods(index *meilisearch.Index) error {
+func indexPods() error {
 	fmt.Println("Using kubebuilder client")
 	kc, err := NewClient()
-	if err != nil {
-		return err
-	}
-
-	clusterUID, err := cu.ClusterUID(kc)
 	if err != nil {
 		return err
 	}
@@ -91,15 +62,21 @@ func indexPods(index *meilisearch.Index) error {
 		return err
 	}
 
-	documents := make([]map[string]interface{}, 0, len(pods.Items))
+	var encoder = schema.NewEncoder()
+	encoder.SetAliasTag("json")
+
 	for _, obj := range pods.Items {
 		obj.SetManagedFields(nil)
-		doc := obj.UnstructuredContent()
-		doc["oid"] = PrimaryKey(clusterUID, &obj)
 
-		documents = append(documents, doc)
+		form := url.Values{}
+		err := encoder.Encode(obj, form)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(form.Encode())
+
+		break
 	}
-	index.AddDocuments(documents, "oid")
 	return nil
 }
 
